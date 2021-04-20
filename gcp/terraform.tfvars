@@ -1,0 +1,5 @@
+project = "caylent-gitops"
+tf_state_bucket = "caylent-gitops-tfstate-p2k7ix"
+github_owner = "james-caylent"
+github_app_repo = "caylent-gitops-app"
+github_infra_repo = "caylent-gitops-infra"

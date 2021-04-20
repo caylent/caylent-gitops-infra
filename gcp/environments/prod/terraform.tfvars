@@ -1,0 +1,12 @@
+env = "prod"
+company = "caylent"
+project = "caylent-gitops"
+tf_state_bucket = "caylent-gitops-tfstate-p2k7ix"
+private_subnet = "10.26.4.0/24"
+region_name = "us-west2"
+gke_username = ""
+gke_password = ""
+gke_num_nodes = 2
+argo_cd_version = "2.0.0"
+argo_cd_namespace = "argocd"
+argo_cd_ha = false

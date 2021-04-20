@@ -1,0 +1,111 @@
+steps:
+  - id: 'tf init'
+    name: 'hashicorp/terraform:0.14.9'
+    dir: 'gcp/environments/dev'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        echo ""
+        echo "*************** TERRAFORM INIT ******************"
+        echo "******* At environment: dev ********"
+        echo "*************************************************"
+        terraform init || exit 1
+  # [START tf-plan]
+  - id: 'tf plan'
+    name: 'hashicorp/terraform:0.14.9'
+    dir: 'gcp/environments/dev'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        echo ""
+        echo "*************** TERRAFORM PLAN ******************"
+        echo "******* At environment: dev ********"
+        echo "*************************************************"
+        terraform plan -out=./dev.plan || exit 1
+  # [END tf-plan]
+
+  # [START tf-apply]
+  - id: 'tf apply'
+    name: 'hashicorp/terraform:0.14.9'
+    dir: 'gcp/environments/dev'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        echo ""
+        echo "*************** TERRAFORM APPLY *****************"
+        echo "******* At environment: dev ********"
+        echo "*************************************************"
+        terraform apply -auto-approve ./dev.plan
+  # [END tf-apply]
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    dir: 'gcp/environments/dev'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        gcloud container clusters get-credentials $$CLOUDSDK_CONTAINER_CLUSTER
+        curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/download/v2.0.0/argocd-linux-amd64
+        chmod +x /usr/local/bin/argocd
+        if [ -z $(kubectl -n argocd get secret argocd-initialized) ]; then
+          kubectl create namespace argocd
+          kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+          kubectl patch svc argocd-server -n argocd -p '{"spec": {"type": "LoadBalancer"}}'
+          echo "Retrieving buit-in argocd admin password..."
+          touch /workspace/argocd_password.txt
+          while [ -z $(cat /workspace/argocd_password.txt) ]; do
+            echo "Built-in argocd admin password not found, polling again..."
+            kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d > /workspace/argocd_password.txt
+            sleep 10
+          done
+          echo "Retrieving argocd-server load balancer address..."
+          touch /workspace/argocd_server.txt
+          while [ -z $(cat /workspace/argocd_server.txt) ]; do
+            echo "ArgoCD Server Load Balancer Address not found, polling again..."
+            kubectl get services -n argocd -l app.kubernetes.io/name=argocd-server -o jsonpath="{.items[0].status.loadBalancer.ingress[0].ip}" > /workspace/argocd_server.txt
+            sleep 10
+          done
+          echo "Logging into argocd-server..."
+          argocd login $(cat /workspace/argocd_server.txt) --username admin --password $(cat /workspace/argocd_password.txt) --insecure
+          echo "Logged into argocd-server..."
+          echo "Updating password to new Google Secret Manager password..."
+          argocd account update-password --account admin --current-password $(cat /workspace/argocd_password.txt) --new-password $$ARGOCD_ADMIN_PASSWORD
+          echo "ArgoCD password updated to properly secured version..."
+          argocd login $(cat /workspace/argocd_server.txt) --username admin --password $$ARGOCD_ADMIN_PASSWORD --insecure
+          echo "ArgoCD logged in again with new secure password..."
+          kubectl -n argocd delete secret argocd-initial-admin-secret
+          echo "Deleted original plaintext ArgoCD admin password from Kubernetes configuration..."
+          kubectl -n argocd create secret generic argocd-initialized --from-literal=initialized=true
+        fi
+        echo "ArgoCD is now installed and secured in the cluster!!!!!"
+        touch /workspace/argocd_github_ssh_private_key.txt
+        chmod 600 /workspace/argocd_github_ssh_private_key.txt
+        echo "$$ARGOCD_GITHUB_SSH_PRIVATE_KEY" > /workspace/argocd_github_ssh_private_key.txt
+        argocd repo add git@github.com:${_OWNER}/${_CONFIG_REPO}.git --name gitops-config --ssh-private-key-path /workspace/argocd_github_ssh_private_key.txt && {
+          echo "Added gitops-config repository to ArgoCD"
+        } || {
+          exit 1
+        }
+        argocd app create gitops-app --repo git@github.com:${_OWNER}/${_CONFIG_REPO}.git --path dev --dest-namespace default --dest-server https://kubernetes.default.svc --directory-recurse && {
+          echo "Created gitops-app in ArgoCD!"
+        } || {
+          exit 1
+        }
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=us-west2'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=caylent-gitops-dev-gke'
+    secretEnv: [ 'ARGOCD_ADMIN_PASSWORD', 'ARGOCD_GITHUB_SSH_PRIVATE_KEY' ]
+
+substitutions:
+  _OWNER: $(push.repository.owner.name)
+  _CONFIG_REPO: caylent-gitops-config
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/${PROJECT_NUMBER}/secrets/argocd-admin-password-dev/versions/latest
+      env: 'ARGOCD_ADMIN_PASSWORD'
+    - versionName: projects/${PROJECT_NUMBER}/secrets/argocd-github-ssh-private-key-dev/versions/latest
+      env: 'ARGOCD_GITHUB_SSH_PRIVATE_KEY'

@@ -1,0 +1,42 @@
+steps:
+- id: 'tf init'
+  name: 'hashicorp/terraform:0.14.9'
+  dir: 'gcp'
+  entrypoint: 'sh'
+  args: 
+  - '-c'
+  - |
+      echo ""
+      echo "*************** TERRAFORM INIT ******************"
+      echo "******* At environment: BASE ********"
+      echo "*************************************************"
+      terraform init || exit 1
+# [START tf-plan]
+- id: 'tf plan'
+  name: 'hashicorp/terraform:0.14.9'
+  dir: 'gcp'
+  entrypoint: 'sh'
+  args: 
+  - '-c'
+  - |
+      echo ""
+      echo "*************** TERRAFORM PLAN ******************"
+      echo "******* At environment: BASE ********"
+      echo "*************************************************"
+      terraform plan -out=./base.plan || exit 1
+# [END tf-plan]
+
+# [START tf-apply]
+- id: 'tf apply'
+  name: 'hashicorp/terraform:0.14.9'
+  dir: 'gcp'
+  entrypoint: 'sh'
+  args: 
+  - '-c'
+  - | 
+      echo ""
+      echo "*************** TERRAFORM APPLY *****************"
+      echo "******* At environment: BASE ********"
+      echo "*************************************************"
+      terraform apply -auto-approve ./base.plan
+# [END tf-apply]
